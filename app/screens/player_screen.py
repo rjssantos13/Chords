@@ -14,6 +14,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from app.data.storage import Song, update_song_chords
+from chords import align_chords_to_beats, extract_beats, get_audio_duration
 
 
 class ChordButton(Button):
@@ -64,6 +65,12 @@ class PlayerScreen(Screen):
         self.current_chord_index: int = -1
         self.chord_buttons: List[ChordButton] = []
 
+        self.beat_mode: bool = False
+        self.beat_data: List[Dict] = []
+        self.beat_buttons: List[ChordButton] = []
+        self.current_beat_index: int = -1
+        self.last_diagram_index: int = -1
+
         self.title_label = Label(text="", size_hint_y=None, height=50)
         self.layout.add_widget(self.title_label)
 
@@ -74,9 +81,6 @@ class PlayerScreen(Screen):
 
         self.play_btn = Button(text="Play", on_press=self.on_play_pressed)
         controls.add_widget(self.play_btn)
-
-        self.pause_btn = Button(text="Pause", on_press=self.on_pause_pressed)
-        controls.add_widget(self.pause_btn)
 
         self.stop_btn = Button(text="Stop", on_press=self.on_stop_pressed)
         controls.add_widget(self.stop_btn)
@@ -97,7 +101,9 @@ class PlayerScreen(Screen):
         diagram_bar_label = Label(text="Chord Diagrams:", size_hint_y=None, height=30)
         self.layout.add_widget(diagram_bar_label)
 
-        self.diagram_scroll = ScrollView(size_hint_y=None, height=150)
+        self.diagram_scroll = ScrollView(
+            size_hint_y=None, height=150, do_scroll_x=True, do_scroll_y=False
+        )
         self.diagram_grid = BoxLayout(
             orientation="horizontal", size_hint_x=None, spacing=5
         )
@@ -124,11 +130,18 @@ class PlayerScreen(Screen):
         self.export_btn.bind(on_press=self.on_export_pressed)
         button_row.add_widget(self.export_btn)
 
-        self.chord_scroll = ScrollView()
-        self.chord_grid = GridLayout(cols=8, size_hint_y=None, spacing=5, padding=5)
-        self.chord_grid.bind(minimum_height=self.chord_grid.setter("height"))
-        self.chord_scroll.add_widget(self.chord_grid)
-        self.layout.add_widget(self.chord_scroll)
+        self.toggle_mode_btn = Button(text="Switch to Beat Grid")
+        self.toggle_mode_btn.bind(on_press=self.on_toggle_mode_pressed)
+        button_row.add_widget(self.toggle_mode_btn)
+
+        self.grid_scroll = ScrollView(size_hint_y=1)
+        self.grid_panel = GridLayout(cols=8, size_hint_y=None, spacing=5, padding=5)
+        self.grid_panel.bind(minimum_height=self.grid_panel.setter("height"))
+        self.grid_scroll.add_widget(self.grid_panel)
+        self.layout.add_widget(self.grid_scroll)
+
+        self.chord_grid = None
+        self.beat_grid = None
 
         back_btn = Button(text="Back to Home", size_hint_y=None, height=50)
         back_btn.bind(on_press=self.on_back_pressed)
@@ -140,6 +153,9 @@ class PlayerScreen(Screen):
         self.title_label.text = song.name
         self.show_removed = False
         self.show_removed_btn.text = "Show Removed"
+        self.beat_mode = False
+        self.toggle_mode_btn.text = "Switch to Beat Grid"
+        self.grid_panel.cols = 8
 
         if self.playback:
             self.playback.stop()
@@ -149,14 +165,19 @@ class PlayerScreen(Screen):
 
         self.seek_slider.value = 0
         self.current_chord_index = -1
+        self.current_beat_index = -1
+        self.last_diagram_index = -1
+        self.play_btn.text = "Play"
         self.build_chord_grid()
         self.build_diagram_bar()
         self.update_time_display()
 
     def build_chord_grid(self):
         """Build the chord grid from song data."""
-        self.chord_grid.clear_widgets()
+        self.grid_panel.clear_widgets()
+        self.grid_panel.cols = 8
         self.chord_buttons = []
+        self.beat_buttons = []
 
         if not self.song:
             return
@@ -166,7 +187,7 @@ class PlayerScreen(Screen):
                 continue
             button = ChordButton(chord_data, remove_callback=self.on_chord_remove)
             self.chord_buttons.append(button)
-            self.chord_grid.add_widget(button)
+            self.grid_panel.add_widget(button)
 
     def get_visible_chords(self):
         """Get list of visible (non-removed) chords."""
@@ -210,6 +231,82 @@ class PlayerScreen(Screen):
 
             self.diagram_widgets.append(widget)
             self.diagram_grid.add_widget(widget)
+
+    def build_beat_grid(self):
+        """Build the beat grid from extracted beats and aligned chords."""
+        self.grid_panel.clear_widgets()
+        self.grid_panel.cols = 16
+        self.chord_buttons = []
+        self.beat_buttons = []
+        self.beat_data = []
+
+        if not self.song:
+            return
+
+        try:
+            beats = extract_beats(self.song.file_path)
+            if not beats:
+                print("No beats extracted, falling back to tempo-based beats")
+                tempo = self.song.tempo if self.song.tempo else 120
+                beat_duration = 60.0 / tempo
+                beats = [
+                    i * beat_duration
+                    for i in range(int(self.song.duration / beat_duration) + 1)
+                ]
+
+            audio_duration = get_audio_duration(self.song.file_path)
+            if audio_duration <= 0:
+                audio_duration = self.song.duration
+
+            visible_chords = self.get_visible_chords()
+            self.beat_data = align_chords_to_beats(
+                visible_chords, beats, audio_duration
+            )
+
+            prev_chord = None
+            for beat_info in self.beat_data:
+                chord_name = beat_info.get("chord", "N")
+                display_text = (
+                    "" if chord_name == prev_chord or chord_name == "N" else chord_name
+                )
+                prev_chord = chord_name
+
+                chord_data = {
+                    "CHORD": display_text,
+                    "START": beat_info.get("start_time", 0),
+                }
+                button = ChordButton(chord_data)
+                button.beat_index = beat_info.get("beat_index", 0)
+                button.full_chord = beat_info.get("chord", "N")
+                self.beat_buttons.append(button)
+                self.grid_panel.add_widget(button)
+
+        except Exception as e:
+            print(f"Error building beat grid: {e}")
+
+    def on_toggle_mode_pressed(self, instance):
+        """Toggle between chord mode and beat mode."""
+        self.beat_mode = not self.beat_mode
+
+        if self.beat_mode:
+            self.toggle_mode_btn.text = "Switch to Chord Grid"
+            self.show_removed_btn.disabled = True
+            self.current_beat_index = -1
+            self.last_diagram_index = -1
+            self.build_beat_grid()
+            Clock.schedule_once(lambda dt: self._reset_scroll_position())
+        else:
+            self.toggle_mode_btn.text = "Switch to Beat Grid"
+            self.show_removed_btn.disabled = False
+            self.current_chord_index = -1
+            self.last_diagram_index = -1
+            self.build_chord_grid()
+            Clock.schedule_once(lambda dt: self._reset_scroll_position())
+
+    def _reset_scroll_position(self):
+        """Reset scroll positions to top/left."""
+        self.grid_scroll.scroll_y = 1
+        self.diagram_scroll.scroll_x = 0
 
     def on_toggle_removed(self, instance):
         """Toggle showing removed chords."""
@@ -506,13 +603,18 @@ class PlayerScreen(Screen):
         divisions = 480
         beats_per_measure = 4
 
-        tempo_val = int(tempo) if tempo else 120
+        try:
+            tempo_val = int(float(tempo)) if tempo else 120
+        except (ValueError, TypeError):
+            tempo_val = 120
         seconds_per_beat = 60.0 / tempo_val
         seconds_per_bar = seconds_per_beat * beats_per_measure
 
         measure_num = 1
         current_measure = None
         attributes_added = False
+        used_offsets = set()
+        max_offset = divisions * beats_per_measure
 
         for i, chord_data in enumerate(chords):
             chord_name = chord_data.get("CHORD", "N")
@@ -521,13 +623,26 @@ class PlayerScreen(Screen):
             if i == 0:
                 start_time = 0.0
 
+            # Calculate bar number directly from time
             bar_number = int(start_time // seconds_per_bar) + 1
+
+            # Calculate offset within the measure (0 to max_offset)
+            beat_position = (
+                (start_time % seconds_per_bar) / seconds_per_bar * beats_per_measure
+            )
+            offset_beats = int(beat_position * divisions)
+
+            # If offset exceeds max, move to next measure
+            while offset_beats >= max_offset and bar_number < 1000:
+                offset_beats -= max_offset
+                bar_number += 1
 
             if bar_number != measure_num or current_measure is None:
                 measure_num = bar_number
                 current_measure = ET.SubElement(
                     part, "measure", number=str(measure_num)
                 )
+                used_offsets = set()
 
                 if not attributes_added:
                     attributes = ET.SubElement(current_measure, "attributes")
@@ -545,14 +660,12 @@ class PlayerScreen(Screen):
                     beat_type.text = "4"
                     attributes_added = True
 
-            harmony = ET.SubElement(current_measure, "harmony")
+            # Skip if this offset is already used in this measure
+            if offset_beats in used_offsets:
+                continue
+            used_offsets.add(offset_beats)
 
-            beat_position = (
-                (start_time % seconds_per_bar) / seconds_per_bar * beats_per_measure
-            )
-            offset_beats = round(beat_position * divisions)
-            if offset_beats == 0:
-                offset_beats = 0
+            harmony = ET.SubElement(current_measure, "harmony")
             offset_elem = ET.SubElement(harmony, "offset")
             offset_elem.text = str(offset_beats)
 
@@ -920,22 +1033,21 @@ class PlayerScreen(Screen):
         return "\n".join(lines)
 
     def on_play_pressed(self, instance):
-        """Handle play button press."""
+        """Handle play/pause button press."""
         if not self.playback:
             return
 
-        self.playback.play()
-        self.start_update_clock()
-
-    def on_pause_pressed(self, instance):
-        """Handle pause button press."""
-        if not self.playback:
-            return
-
-        if self.playback.playing:
+        if self.play_btn.text == "Pause":
             self.playback.pause()
+            self.play_btn.text = "Unpause"
+        elif self.play_btn.text == "Unpause":
+            self.playback.resume()
+            self.play_btn.text = "Pause"
+            self.start_update_clock()
         else:
             self.playback.play()
+            self.play_btn.text = "Pause"
+            self.start_update_clock()
 
     def on_stop_pressed(self, instance):
         """Handle stop button press."""
@@ -945,6 +1057,10 @@ class PlayerScreen(Screen):
         self.playback.stop()
         self.playback.seek(0)
         self.seek_slider.value = 0
+        self.current_chord_index = -1
+        self.current_beat_index = -1
+        self.last_diagram_index = -1
+        self.play_btn.text = "Play"
         self.update_time_display()
         self.update_chord_highlight()
 
@@ -996,6 +1112,7 @@ class PlayerScreen(Screen):
             self.update_chord_highlight()
         elif position >= duration:
             self.stop_update_clock()
+            self.play_btn.text = "Play"
 
     def update_time_display(self, position: float = 0):
         """Update the time display."""
@@ -1019,6 +1136,56 @@ class PlayerScreen(Screen):
             return
 
         position = self.playback.curr_pos
+
+        if self.beat_mode:
+            self._update_beat_highlight(position)
+        else:
+            self._update_chord_grid_highlight(position)
+
+    def _scroll_diagram_to_center(self, widget):
+        """Scroll diagram to center horizontally in scroll view."""
+        if not widget or not self.diagram_scroll:
+            return
+        scroll_width = self.diagram_scroll.width
+        widget_x = widget.x
+        widget_width = widget.width
+        grid_width = self.diagram_grid.width
+
+        if grid_width <= scroll_width:
+            return
+
+        center_offset = widget_x - (scroll_width / 2) + (widget_width / 2)
+        scroll_x = center_offset / (grid_width - scroll_width)
+        self.diagram_scroll.scroll_x = max(0, min(1, scroll_x))
+
+    def _scroll_beat_grid(self, target_button, cols=16):
+        """Scroll beat grid to keep highlighted item centered, 2 rows from bottom."""
+        if not target_button or not self.grid_scroll:
+            return
+
+        scroll_height = self.grid_scroll.height
+        widget_y = target_button.y
+        widget_height = target_button.height
+        grid_height = self.grid_panel.height
+
+        if grid_height <= scroll_height:
+            return
+
+        # Calculate position - aim to keep widget 2 rows from bottom
+        # Each row is approximately widget_height
+        two_rows_offset = widget_height * 2
+        target_y = widget_y - two_rows_offset
+
+        # Convert to scroll_y (0 = bottom, 1 = top)
+        scroll_range = grid_height - scroll_height
+        if scroll_range <= 0:
+            return
+
+        scroll_y = 1 - (target_y / scroll_range)
+        self.grid_scroll.scroll_y = max(0, min(1, scroll_y))
+
+    def _update_chord_grid_highlight(self, position: float):
+        """Update chord grid highlighting."""
         visible_chords = self.get_visible_chords()
         new_index = -1
 
@@ -1044,7 +1211,7 @@ class PlayerScreen(Screen):
 
             if new_index >= 0 and new_index < len(self.chord_buttons):
                 target_button = self.chord_buttons[new_index]
-                self.chord_scroll.scroll_to(target_button, padding=130, animate=True)
+                self.grid_scroll.scroll_to(target_button, padding=200, animate=True)
 
             for i, widget in enumerate(self.diagram_widgets):
                 if i == new_index:
@@ -1054,7 +1221,83 @@ class PlayerScreen(Screen):
 
             if new_index >= 0 and new_index < len(self.diagram_widgets):
                 target_widget = self.diagram_widgets[new_index]
-                self.diagram_scroll.scroll_to(target_widget, padding=50, animate=True)
+                self._scroll_diagram_to_center(target_widget)
+
+    def _update_beat_highlight(self, position: float):
+        """Update beat grid highlighting."""
+        if not self.beat_data:
+            return
+
+        new_index = -1
+
+        for i, beat_info in enumerate(self.beat_data):
+            start_time = beat_info.get("start_time", 0)
+            if i + 1 < len(self.beat_data):
+                next_start = self.beat_data[i + 1].get("start_time", 0)
+            else:
+                next_start = self.song.duration
+
+            if start_time <= position < next_start:
+                new_index = i
+                break
+
+        if new_index != self.current_beat_index:
+            self.current_beat_index = new_index
+
+            for i, button in enumerate(self.beat_buttons):
+                if i == new_index:
+                    button.background_color = [0.2, 0.6, 0.2, 1]
+                else:
+                    button.background_color = [0.3, 0.3, 0.3, 1]
+
+            if new_index >= 0 and new_index < len(self.beat_buttons):
+                target_button = self.beat_buttons[new_index]
+                self.grid_scroll.scroll_to(target_button, padding=50, animate=True)
+
+            current_chord_name = None
+            current_chord_start = None
+            if new_index >= 0 and new_index < len(self.beat_data):
+                current_chord_name = self.beat_data[new_index].get("chord", "N")
+                current_chord_start = self.beat_data[new_index].get("start_time", 0)
+
+            # First, clear all diagram highlights
+            for widget in self.diagram_widgets:
+                widget.children[0].color = [1, 1, 1, 1]
+
+            if current_chord_name and current_chord_name != "N":
+                visible_chords = self.get_visible_chords()
+                target_idx = -1
+                for i, chord_data in enumerate(visible_chords):
+                    if (
+                        chord_data.get("CHORD") == current_chord_name
+                        and abs(chord_data.get("START", 0) - current_chord_start) < 1.0
+                    ):
+                        target_idx = i
+                        break
+
+                if target_idx >= 0 and target_idx < len(self.diagram_widgets):
+                    self.diagram_widgets[target_idx].children[0].color = [
+                        0.2,
+                        0.8,
+                        0.2,
+                        1,
+                    ]
+                    self.last_diagram_index = target_idx
+                    self._scroll_diagram_to_center(self.diagram_widgets[target_idx])
+                else:
+                    # Keep last diagram highlighted
+                    if self.last_diagram_index >= 0 and self.last_diagram_index < len(
+                        self.diagram_widgets
+                    ):
+                        self.diagram_widgets[self.last_diagram_index].children[
+                            0
+                        ].color = [0.2, 0.8, 0.2, 1]
+            else:
+                for i, widget in enumerate(self.diagram_widgets):
+                    if i == self.last_diagram_index:
+                        widget.children[0].color = [0.2, 0.8, 0.2, 1]
+                    else:
+                        widget.children[0].color = [1, 1, 1, 1]
 
     def on_back_pressed(self, instance):
         """Handle back button press."""

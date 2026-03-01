@@ -433,7 +433,10 @@ class SongNameDialog(BoxLayout):
         content.add_widget(Label(text="Enter a name for this song:"))
 
         name_input = TextInput(
-            text=os.path.splitext(os.path.basename(self.file_path))[0]
+            text=os.path.splitext(os.path.basename(self.file_path))[0],
+            size_hint_y=None,
+            height=30,
+            font_size="16sp",
         )
         content.add_widget(name_input)
 
@@ -480,7 +483,12 @@ class YouTubeNameDialog(BoxLayout):
         content = BoxLayout(orientation="vertical", padding=20, spacing=10)
         content.add_widget(Label(text="Enter a name for this song:"))
 
-        name_input = TextInput(text=self.default_title)
+        name_input = TextInput(
+            text=self.default_title,
+            size_hint_y=None,
+            height=30,
+            font_size="16sp",
+        )
         content.add_widget(name_input)
 
         buttons = BoxLayout(
