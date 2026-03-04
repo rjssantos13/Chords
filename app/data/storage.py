@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.config import get_songs_path
+from app.data.chord_defaults import get_default_version
 
 
 class Song:
@@ -146,9 +147,45 @@ def regenerate_missing_diagrams() -> tuple:
                 if chord_name and chord_name in diagram_paths:
                     if not chord.get("DIAGRAM"):
                         chord["DIAGRAM"] = diagram_paths[chord_name]
+                        # Store the version used
+                        version = get_default_version(chord_name)
+                        chord["VERSION"] = version
                         diagrams_generated += 1
 
             update_song_chords(song.id, song.chords)
             songs_updated += 1
 
     return songs_updated, diagrams_generated
+
+
+def update_songs_for_chord(chord_name: str, new_version: int) -> int:
+    """Update all songs using a specific chord to use a new version.
+
+    Args:
+        chord_name: The chord name to update
+        new_version: The new default version
+
+    Returns:
+        Number of songs updated
+    """
+    from app.data.chord_diagram import generate_chord_diagram
+
+    songs = load_songs()
+    songs_updated = 0
+
+    for song in songs:
+        updated = False
+        for chord in song.chords:
+            if chord.get("CHORD") == chord_name:
+                # Generate new diagram with new version
+                diagram_path = generate_chord_diagram(chord_name, version=new_version)
+                if diagram_path:
+                    chord["DIAGRAM"] = diagram_path
+                    chord["VERSION"] = new_version
+                    updated = True
+
+        if updated:
+            update_song_chords(song.id, song.chords)
+            songs_updated += 1
+
+    return songs_updated

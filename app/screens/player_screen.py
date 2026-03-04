@@ -8,6 +8,7 @@ from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.image import AsyncImage
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.slider import Slider
@@ -21,7 +22,12 @@ class ChordButton(Button):
     """Button representing a single chord in the grid."""
 
     def __init__(
-        self, chord_data: Dict, is_active: bool = False, remove_callback=None, **kwargs
+        self,
+        chord_data: Dict,
+        is_active: bool = False,
+        remove_callback=None,
+        seek_callback=None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.chord_data = chord_data
@@ -29,6 +35,7 @@ class ChordButton(Button):
         self.start_time = chord_data.get("START", 0)
         self.is_removed = chord_data.get("REMOVED", False)
         self.remove_callback = remove_callback
+        self.seek_callback = seek_callback
         self.text = self.chord_name
         self.size_hint_y = None
         self.height = 60
@@ -44,6 +51,14 @@ class ChordButton(Button):
             self.background_color = [0.3, 0.3, 0.3, 1]
 
         self.bind(on_press=self.toggle_removal)
+
+    def on_touch_down(self, touch):
+        """Handle touch to detect right-click for seek."""
+        if touch.button == "right" and self.collide_point(*touch.pos):
+            if self.seek_callback:
+                self.seek_callback(self.start_time)
+            return True
+        return super(ChordButton, self).on_touch_down(touch)
 
     def toggle_removal(self, instance):
         """Handle button press to toggle removal."""
@@ -185,7 +200,11 @@ class PlayerScreen(Screen):
         for chord_data in self.song.chords:
             if chord_data.get("REMOVED", False) and not self.show_removed:
                 continue
-            button = ChordButton(chord_data, remove_callback=self.on_chord_remove)
+            button = ChordButton(
+                chord_data,
+                remove_callback=self.on_chord_remove,
+                seek_callback=self.seek_to,
+            )
             self.chord_buttons.append(button)
             self.grid_panel.add_widget(button)
 
@@ -194,6 +213,85 @@ class PlayerScreen(Screen):
         if not self.song:
             return []
         return [c for c in self.song.chords if not c.get("REMOVED", False)]
+
+    def show_version_popup(self, chord_name: str, widget):
+        """Show popup to select chord version."""
+        from app.data.chord_diagram import (
+            generate_chord_diagram_for_version,
+            get_chord_versions_count,
+        )
+
+        version_count = get_chord_versions_count(chord_name)
+        if version_count <= 1:
+            return
+
+        content = BoxLayout(orientation="vertical", spacing=10, padding=10)
+        content.add_widget(
+            Label(text=f"Select version for {chord_name}:", size_hint_y=None, height=40)
+        )
+
+        versions_scroll = ScrollView(size_hint_y=1)
+        versions_layout = BoxLayout(
+            orientation="horizontal", size_hint_x=None, spacing=10
+        )
+        versions_layout.bind(minimum_width=versions_layout.setter("width"))
+
+        popup = Popup(
+            title=f"Select {chord_name} Version",
+            content=content,
+            size_hint=(0.8, 0.6),
+            auto_dismiss=True,
+        )
+
+        for v in range(1, version_count + 1):
+            diagram_path = generate_chord_diagram_for_version(chord_name, v)
+
+            ver_box = BoxLayout(
+                orientation="vertical", size_hint_x=None, width=120, spacing=5
+            )
+
+            if diagram_path:
+                img = AsyncImage(source=diagram_path, size_hint_y=None, height=150)
+            else:
+                img = Label(text="No Diagram", size_hint_y=None, height=150, width=120)
+
+            ver_box.add_widget(img)
+
+            btn = Button(text=f"v{v}", size_hint_y=None, height=40)
+            btn.bind(
+                on_press=lambda instance, ver=v, p=popup: self.on_version_selected(
+                    chord_name, ver, p
+                )
+            )
+            ver_box.add_widget(btn)
+
+            versions_layout.add_widget(ver_box)
+
+        versions_scroll.add_widget(versions_layout)
+        content.add_widget(versions_scroll)
+
+        close_btn = Button(text="Cancel", size_hint_y=None, height=40)
+        close_btn.bind(on_press=lambda x: popup.dismiss())
+        content.add_widget(close_btn)
+
+        popup.open()
+
+    def on_version_selected(self, chord_name: str, version: int, popup=None):
+        """Handle version selection for a chord."""
+        from app.data.chord_diagram import generate_chord_diagram_for_version
+
+        if popup:
+            popup.dismiss()
+
+        for chord_data in self.song.chords:
+            if chord_data.get("CHORD") == chord_name:
+                diagram_path = generate_chord_diagram_for_version(chord_name, version)
+                if diagram_path:
+                    chord_data["DIAGRAM"] = diagram_path
+                    chord_data["VERSION"] = version
+
+        update_song_chords(self.song.id, self.song.chords)
+        self.build_diagram_bar()
 
     def build_diagram_bar(self):
         """Build the chord diagram bar."""
@@ -209,6 +307,17 @@ class PlayerScreen(Screen):
 
             diagram_path = chord_data.get("DIAGRAM")
             chord_name = chord_data.get("CHORD", "")
+
+            # Backwards compatibility: if diagram path is missing or file doesn't exist,
+            # regenerate it using the default version
+            if not diagram_path or not os.path.exists(diagram_path):
+                from app.data.chord_diagram import generate_chord_diagram
+
+                diagram_path = generate_chord_diagram(chord_name)
+                if diagram_path:
+                    chord_data["DIAGRAM"] = diagram_path
+                    # Save the updated chord data
+                    update_song_chords(self.song.id, self.song.chords)
 
             widget = BoxLayout(
                 orientation="vertical", size_hint_x=None, width=100, spacing=2
@@ -228,6 +337,15 @@ class PlayerScreen(Screen):
 
             widget.chord_index = len(self.diagram_widgets)
             widget.chord_start = chord_data.get("START", 0)
+            widget.chord_name = chord_name
+
+            widget.bind(
+                on_touch_down=lambda w, touch: (
+                    self.show_version_popup(w.chord_name, w)
+                    if w.collide_point(touch.x, touch.y)
+                    else None
+                )
+            )
 
             self.diagram_widgets.append(widget)
             self.diagram_grid.add_widget(widget)
@@ -275,7 +393,7 @@ class PlayerScreen(Screen):
                     "CHORD": display_text,
                     "START": beat_info.get("start_time", 0),
                 }
-                button = ChordButton(chord_data)
+                button = ChordButton(chord_data, seek_callback=self.seek_to)
                 button.beat_index = beat_info.get("beat_index", 0)
                 button.full_chord = beat_info.get("chord", "N")
                 self.beat_buttons.append(button)
@@ -1072,6 +1190,15 @@ class PlayerScreen(Screen):
         if touch.grab_current == instance:
             position = (instance.value / 100) * self.song.duration
             self.update_time_display(position)
+
+    def seek_to(self, position: float):
+        """Seek to a specific position in the song."""
+        if not self.playback or not self.song:
+            return
+        self.playback.seek(float(position))
+        self.seek_slider.value = float((position / self.song.duration) * 100)
+        self.update_time_display(float(position))
+        self.update_chord_highlight()
 
     def on_seek_release(self, instance, touch):
         """Handle seek slider release."""

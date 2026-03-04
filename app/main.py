@@ -6,6 +6,7 @@ from app.screens.home_screen import HomeScreen
 from app.screens.add_song_screen import AddSongScreen
 from app.screens.settings_screen import SettingsScreen
 from app.screens.player_screen import PlayerScreen
+from app.screens.chord_db_screen import ChordDBManagerScreen
 
 
 class ChordsApp(App):
@@ -23,6 +24,7 @@ class ChordsApp(App):
         sm.add_widget(AddSongScreen(name="add_song"))
         sm.add_widget(SettingsScreen(name="settings"))
         sm.add_widget(PlayerScreen(name="player"))
+        sm.add_widget(ChordDBManagerScreen(name="chord_db_manager"))
         return sm
 
 

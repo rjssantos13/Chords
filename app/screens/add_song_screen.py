@@ -20,6 +20,7 @@ from app.data.downloader import download_youtube_audio, search_youtube
 from app.data.storage import Song, save_song
 from chords import get_chord_dict, get_tempo_and_time_signature
 from app.data.chord_diagram import generate_all_chord_diagrams
+from app.data.chord_defaults import get_default_version
 
 
 class YouTubeSearchResult(BoxLayout):
@@ -275,6 +276,9 @@ class AddSongScreen(Screen):
                 chord_name = chord.get("CHORD")
                 if chord_name and chord_name in diagram_paths:
                     chord["DIAGRAM"] = diagram_paths[chord_name]
+                    # Store the version used (default version)
+                    version = get_default_version(chord_name)
+                    chord["VERSION"] = version
 
             storage_folder = ensure_storage_exists()
             file_name = os.path.basename(file_path)
@@ -382,6 +386,9 @@ class AddSongScreen(Screen):
                 chord_name = chord.get("CHORD")
                 if chord_name and chord_name in diagram_paths:
                     chord["DIAGRAM"] = diagram_paths[chord_name]
+                    # Store the version used (default version)
+                    version = get_default_version(chord_name)
+                    chord["VERSION"] = version
 
             duration = 0.0
             if chords:

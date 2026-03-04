@@ -103,6 +103,10 @@ class HomeScreen(Screen):
         settings_btn.bind(on_press=self.on_settings_pressed)
         button_row.add_widget(settings_btn)
 
+        chord_db_btn = Button(text="Chord DB")
+        chord_db_btn.bind(on_press=self.on_chord_db_pressed)
+        button_row.add_widget(chord_db_btn)
+
     def on_enter(self):
         """Called when entering this screen."""
         self.refresh_song_list()
@@ -144,3 +148,7 @@ class HomeScreen(Screen):
     def on_settings_pressed(self, instance):
         """Handle settings button press."""
         self.manager.current = "settings"
+
+    def on_chord_db_pressed(self, instance):
+        """Handle chord database button press."""
+        self.manager.current = "chord_db_manager"
