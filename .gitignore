@@ -1,12 +1,89 @@
-# Python-generated files
+# Byte-compiled / optimized / compiled files
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.pyo
+
+# C extensions
+*.so
+
+# Distribution / packaging
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+*.egg
+MANIFEST
 
 # Virtual environments
-.venv
-.venv*
+.venv/
+.venv39/
+venv/
+env/
+ENV/
+*.venv/
 
+# IDE / editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+
+# Data / cache directories
+*.db
+*.sqlite
+*.sqlite3
+*.cache
+
+# Project-specific
+chord_diagrams/
+downloads/
+config.json
+songs.json
+chord_defaults.json
+Chords JSON database.txt
+*.svg
+*.csv
+chords_with_versions.csv
+chord-fingers.csv
+regenerate_diagrams.py
+uv.lock
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# ruff
+.ruff_cache/
+
+# Hatch
+.hatch/

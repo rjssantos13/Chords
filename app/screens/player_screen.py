@@ -1181,6 +1181,7 @@ class PlayerScreen(Screen):
         self.play_btn.text = "Play"
         self.update_time_display()
         self.update_chord_highlight()
+        self._reset_scroll_position()
 
     def on_seek(self, instance, touch):
         """Handle seek slider movement."""
@@ -1240,6 +1241,7 @@ class PlayerScreen(Screen):
         elif position >= duration:
             self.stop_update_clock()
             self.play_btn.text = "Play"
+            self._reset_scroll_position()
 
     def update_time_display(self, position: float = 0):
         """Update the time display."""
